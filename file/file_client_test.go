@@ -60,36 +60,6 @@ func TestCreateAndList(t *testing.T) {
 	}
 }
 
-func TestNonEmptyRepository(t *testing.T) {
-	dir, err := ioutil.TempDir("", "gloo-secret-test")
-	if err != nil {
-		t.Errorf("unable to get temporary directory %q", err)
-	}
-	defer os.RemoveAll(dir)
-
-	client, err := NewClient(dir)
-	if err != nil {
-		t.Errorf("Unable to setup client %q", err)
-	}
-	secret := &secret.Secret{Name: "test", Data: map[string][]byte{
-		"user":     []byte("hello"),
-		"password": []byte("secret"),
-	}}
-	_, err = client.V1().Create(secret)
-	if err != nil {
-		t.Errorf("unable to create secrets %q", err)
-	}
-
-	client, err = NewClient(dir)
-	secrets, err := client.V1().List()
-	if err != nil {
-		t.Errorf("unable to list with non empty repository %q", err)
-	}
-	if len(secrets) != 1 {
-		t.Errorf("was expecting non empty repository")
-	}
-}
-
 func TestDelete(t *testing.T) {
 	dir, err := ioutil.TempDir("", "gloo-secret-test")
 	if err != nil {

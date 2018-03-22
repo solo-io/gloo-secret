@@ -33,11 +33,7 @@ func NewClient(dir string) (secret.SecretInterface, error) {
 			return nil, errors.Wrap(err, "error setting up secrets folder")
 		}
 	}
-	secrets, err := load(dir)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to initialize client")
-	}
-	v := V1{client: &v1Client{dir: dir, cache: secrets}}
+	v := V1{client: &v1Client{dir: dir}}
 	return &v, nil
 }
 
@@ -50,12 +46,15 @@ func (v *V1) V1() secret.V1 {
 }
 
 type v1Client struct {
-	dir   string
-	cache map[string]*secret.Secret // not thread safe yet
+	dir string
 }
 
 func (c *v1Client) Create(s *secret.Secret) (*secret.Secret, error) {
-	_, exists := c.cache[s.Name]
+	secrets, err := load(c.dir)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to load existing secrets")
+	}
+	_, exists := secrets[s.Name]
 	if exists {
 		return nil, errors.Errorf("secret with name %s already exists", s.Name)
 	}
@@ -64,7 +63,6 @@ func (c *v1Client) Create(s *secret.Secret) (*secret.Secret, error) {
 	if err := WriteToFile(filename, SecretToFS(s)); err != nil {
 		return nil, errors.Wrap(err, "unable to save secret")
 	}
-	c.cache[s.Name] = s
 	return s, nil
 }
 
@@ -72,7 +70,12 @@ func (c *v1Client) Update(s *secret.Secret) (*secret.Secret, error) {
 	if s.ResourceVersion == "" {
 		return nil, errors.New("updating secret requires resource version")
 	}
-	existing, exists := c.cache[s.Name]
+
+	secrets, err := load(c.dir)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to load existing secrets")
+	}
+	existing, exists := secrets[s.Name]
 	if !exists {
 		return nil, errors.Errorf("secret %s does not exist", s.Name)
 	}
@@ -84,24 +87,30 @@ func (c *v1Client) Update(s *secret.Secret) (*secret.Secret, error) {
 	if err := WriteToFile(filename, SecretToFS(s)); err != nil {
 		return nil, errors.Wrap(err, "unable to save secret")
 	}
-	c.cache[s.Name] = s
 	return s, nil
 }
 
 func (c *v1Client) Delete(name string) error {
-	_, exists := c.cache[name]
+	secrets, err := load(c.dir)
+	if err != nil {
+		return errors.Wrap(err, "unable to load existing secrets")
+	}
+	_, exists := secrets[name]
 	if !exists {
 		return errors.Errorf("secret %s does not exist", name)
 	}
 	if err := os.Remove(filepath.Join(c.dir, name+".json")); err != nil {
 		return err
 	}
-	delete(c.cache, name)
 	return nil
 }
 
 func (c *v1Client) Get(name string) (*secret.Secret, error) {
-	s, exists := c.cache[name]
+	secrets, err := load(c.dir)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to load existing secrets")
+	}
+	s, exists := secrets[name]
 	if !exists {
 		return nil, errors.Errorf("secret %s does not exist", name)
 	}
@@ -109,13 +118,17 @@ func (c *v1Client) Get(name string) (*secret.Secret, error) {
 }
 
 func (c *v1Client) List() ([]*secret.Secret, error) {
-	secrets := make([]*secret.Secret, len(c.cache))
+	secrets, err := load(c.dir)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to load existing secrets")
+	}
+	out := make([]*secret.Secret, len(secrets))
 	i := 0
-	for _, v := range c.cache {
-		secrets[i] = v
+	for _, v := range secrets {
+		out[i] = v
 		i++
 	}
-	return secrets, nil
+	return out, nil
 }
 
 func load(dir string) (map[string]*secret.Secret, error) {
@@ -135,7 +148,8 @@ func load(dir string) (map[string]*secret.Secret, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "unable to parse %s as secret", name)
 		}
-		secrets[name] = SecretFromFS(&fs)
+		s := SecretFromFS(&fs)
+		secrets[s.Name] = s
 	}
 	return secrets, nil
 }
